@@ -330,15 +330,14 @@ export default class HaTilesPreferences extends ExtensionPreferences {
             title: 'Quick Settings tiles',
             description: 'Each tile is a button in Quick Settings; its arrow opens a menu with the sections you choose. Drag tiles to reorder them.',
         });
-        const add = button('Add tile', {icon: 'list-add-symbolic'});
-        add.connect('clicked', () => {
+        const add = new Adw.ButtonRow({title: 'Add tile'});
+        add.connect('activated', () => {
             const tile = {id: newId(), title: 'New tile', icon: 'auto', primary: '', sections: 'all', wide: false, indicator: false};
             tiles.push(tile);
             this._expanded.add(`tile:${tile.id}`);
             save();
             this._refreshTiles();
         });
-        list.set_header_suffix(add);
         groups.push(list);
 
         if (!tiles.length) {
@@ -358,6 +357,7 @@ export default class HaTilesPreferences extends ExtensionPreferences {
             });
             list.add(row);
         }
+        list.add(add);
 
         if (!this._ready)
             groups.push(this._notConnectedGroup('main entities and sections'));
@@ -510,8 +510,8 @@ export default class HaTilesPreferences extends ExtensionPreferences {
                 'Members of a custom group are not shown in their Home Assistant area. ' +
                 'Areas themselves are managed in Home Assistant.',
         });
-        const add = button('Add group', {icon: 'list-add-symbolic'});
-        add.connect('clicked', () => {
+        const add = new Adw.ButtonRow({title: 'Add group'});
+        add.connect('activated', () => {
             const group = {id: newId(), name: 'New group', icon: 'mdi:group', devices: [], entities: [], order: [], exclude: []};
             groups.push(group);
             this._expanded.add(`group:${group.id}`);
@@ -519,7 +519,6 @@ export default class HaTilesPreferences extends ExtensionPreferences {
             this._refreshGroups();
             this._refreshTiles();
         });
-        list.set_header_suffix(add);
         result.push(list);
 
         if (!groups.length)
@@ -535,6 +534,7 @@ export default class HaTilesPreferences extends ExtensionPreferences {
             });
             list.add(row);
         }
+        list.add(add);
 
         if (!this._ready)
             result.push(this._notConnectedGroup('devices and entities'));
