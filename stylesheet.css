@@ -3,8 +3,8 @@
 }
 
 .haqs-section-header {
-  padding-top: 8px;
-  padding-bottom: 4px;
+  padding-top: 6px;
+  padding-bottom: 2px;
 }
 
 .haqs-section-title {
@@ -16,7 +16,7 @@
 }
 
 .haqs-device-header {
-  padding-top: 6px;
+  padding-top: 3px;
   padding-bottom: 0;
   font-size: 0.85em;
   font-weight: bold;
@@ -33,6 +33,8 @@
 
 .haqs-entity-item {
   spacing: 10px;
+  padding-top: 5px;
+  padding-bottom: 5px;
 }
 
 .haqs-entity-icon {
@@ -56,7 +58,7 @@
 }
 
 .haqs-slider {
-  margin-top: 4px;
+  margin-top: 2px;
   min-height: 18px;
 }
 
