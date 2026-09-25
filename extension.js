@@ -47,12 +47,19 @@ class HaTile extends QuickMenuToggle {
         this.menu.addMenuItem(this._section);
         this.menu.box.remove_child(this._section.actor);
         this._scroll = new St.ScrollView({
-            style_class: 'haqs-scroll',
+            style_class: 'haqs-scroll vfade',
             hscrollbar_policy: St.PolicyType.NEVER,
             vscrollbar_policy: St.PolicyType.AUTOMATIC,
             child: this._section.actor,
         });
         this.menu.box.add_child(this._scroll);
+
+        // Size the list to the space below the tile each time the menu opens
+        const open = this.menu.open.bind(this.menu);
+        this.menu.open = animate => {
+            this._fitToScreen();
+            open(animate);
+        };
 
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
         this._statusItem = this.menu.addAction('', () => {});
@@ -62,6 +69,23 @@ class HaTile extends QuickMenuToggle {
         this.menu.addAction('Settings', () => ctx.openPreferences());
 
         this.rebuild();
+    }
+
+    // The menu opens below this tile's row; give the list whatever height is left
+    // on the monitor after the menu header and footer.
+    _fitToScreen() {
+        const monitor = Main.layoutManager.findMonitorForActor(this) ?? Main.layoutManager.primaryMonitor;
+        const workArea = Main.layoutManager.getWorkAreaForMonitor(monitor.index);
+        const [, tileY] = this.get_transformed_position();
+        const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
+
+        this._scroll.style = null;
+        const [, boxHeight] = this.menu.box.get_preferred_height(-1);
+        const [, listHeight] = this._scroll.get_preferred_height(-1);
+        const chrome = boxHeight - listHeight + 48; // header, footer, menu padding and spacing
+        const available = workArea.y + workArea.height - (tileY + this.height) - chrome;
+        const maxHeight = Math.max(160 * scale, available);
+        this._scroll.style = `max-height: ${Math.floor(maxHeight / scale)}px;`;
     }
 
     get config() {
