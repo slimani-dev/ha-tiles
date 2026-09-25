@@ -68,7 +68,12 @@ function makeReorderable(row, scope, ref, onMove) {
     row.add_prefix(new Gtk.Image({icon_name: 'list-drag-handle-symbolic', css_classes: ['dim-label']}));
 
     const source = new Gtk.DragSource({actions: Gdk.DragAction.MOVE});
-    source.connect('prepare', () => Gdk.ContentProvider.new_for_value(`${scope}\n${ref}`));
+    source.connect('prepare', () => {
+        const value = new GObject.Value();
+        value.init(GObject.TYPE_STRING);
+        value.set_string(`${scope}\n${ref}`);
+        return Gdk.ContentProvider.new_for_value(value);
+    });
     source.connect('drag-begin', src => src.set_icon(new Gtk.WidgetPaintable({widget: row}), 0, 0));
     row.add_controller(source);
 
@@ -163,6 +168,32 @@ export default class HaQuickSettingsPreferences extends ExtensionPreferences {
         const areaId = E.entityAreaId(this._client, id);
         const area = areaId ? this._client.areas.get(areaId)?.name : null;
         return area ? `${id} · ${area}` : id;
+    }
+
+    // Opens a page on top of the window (with a back button). build(render) returns
+    // the page's groups; call render() to rebuild them, e.g. after a reorder.
+    _pushSubpage(title, build, onHidden) {
+        const page = new Adw.PreferencesPage();
+        const toolbar = new Adw.ToolbarView({content: page});
+        toolbar.add_top_bar(new Adw.HeaderBar());
+        const nav = new Adw.NavigationPage({title, child: toolbar});
+        let groups = [];
+        const render = () => {
+            groups.forEach(g => page.remove(g));
+            groups = build(render);
+            groups.forEach(g => page.add(g));
+        };
+        render();
+        if (onHidden)
+            nav.connect('hidden', onHidden);
+        this._window.push_subpage(nav);
+    }
+
+    _subpageRow(title, subtitle, onActivate) {
+        const row = new Adw.ActionRow({title: escape(title), subtitle: escape(subtitle), activatable: true});
+        row.add_suffix(new Gtk.Image({icon_name: 'go-next-symbolic'}));
+        row.connect('activated', onActivate);
+        return row;
     }
 
     _trackExpanded(row, key) {
@@ -356,7 +387,10 @@ export default class HaQuickSettingsPreferences extends ExtensionPreferences {
                 resummarize();
             });
             expander.add_row(primary);
-            expander.add_row(this._tileSectionsRow(tile, save, resummarize));
+            expander.add_row(this._subpageRow('Sections', 'Which areas and groups the menu shows, and their order',
+                () => this._pushSubpage(`${tile.title || 'Tile'} · Sections`,
+                    render => this._tileSectionsGroups(tile, save, render),
+                    () => this._refreshTiles())));
         }
 
         const wide = new Adw.SwitchRow({title: 'Wide tile', subtitle: 'Span both Quick Settings columns', active: !!tile.wide});
@@ -376,23 +410,22 @@ export default class HaQuickSettingsPreferences extends ExtensionPreferences {
     }
 
     // Which sections the tile shows, in menu order; drag to reorder
-    _tileSectionsRow(tile, save, resummarize) {
+    _tileSectionsGroups(tile, save, render) {
         const sections = E.allSections(this._client, this._load('groups'));
         const allRefs = sections.map(s => s.ref);
         const byRef = new Map(sections.map(s => [s.ref, s]));
 
-        const expander = new Adw.ExpanderRow({title: 'Sections', subtitle: 'Drag to set the menu order'});
-        this._trackExpanded(expander, `tile-sections:${tile.id}`);
-
-        let syncing = false;
+        const allGroup = new Adw.PreferencesGroup();
         const allRow = new Adw.SwitchRow({
             title: 'All sections',
             subtitle: 'Includes areas and groups added later',
             active: tile.sections === 'all',
         });
-        expander.add_row(allRow);
+        allGroup.add(allRow);
 
-        const rows = new Map();
+        const list = new Adw.PreferencesGroup({title: 'Sections', description: 'Drag to set the menu order.'});
+        let syncing = false;
+        const rows = [];
         const selected = () => tile.sections === 'all' ? [...allRefs] : [...tile.sections];
         for (const ref of E.orderRefs(allRefs, tile.sectionOrder)) {
             const section = byRef.get(ref);
@@ -410,15 +443,14 @@ export default class HaQuickSettingsPreferences extends ExtensionPreferences {
                 allRow.active = false;
                 syncing = false;
                 save();
-                resummarize();
             });
             makeReorderable(row, `sections:${tile.id}`, ref, (from, to) => {
                 tile.sectionOrder = moveRef(E.orderRefs(allRefs, tile.sectionOrder), from, to);
                 save();
-                this._refreshTiles();
+                render();
             });
-            rows.set(ref, row);
-            expander.add_row(row);
+            rows.push(row);
+            list.add(row);
         }
 
         allRow.connect('notify::active', () => {
@@ -429,9 +461,8 @@ export default class HaQuickSettingsPreferences extends ExtensionPreferences {
             rows.forEach(r => (r.active = true));
             syncing = false;
             save();
-            resummarize();
         });
-        return expander;
+        return [allGroup, list];
     }
 
     _tileSummary(tile) {
@@ -521,34 +552,29 @@ export default class HaQuickSettingsPreferences extends ExtensionPreferences {
         if (!this._ready)
             return expander;
 
-        // Members in menu order; drag to reorder, open a device to pick its entities
-        const members = new Adw.ExpanderRow({title: 'Members', subtitle: 'Drag to set the menu order. Open a device to choose what it shows.'});
-        this._trackExpanded(members, `group-members:${group.id}`);
-        let memberRows = [];
-        const renderMembers = () => {
-            memberRows.forEach(r => members.remove(r));
-            memberRows = E.groupMemberRefs(group).map(ref => this._memberRow(group, ref, save, renderMembers));
-            if (!memberRows.length)
-                memberRows.push(new Adw.ActionRow({title: 'No members yet', subtitle: 'Add devices or single entities below.', activatable: false}));
-            memberRows.forEach(r => members.add_row(r));
-            expander.subtitle = summary();
-        };
-        renderMembers();
-        expander.add_row(members);
+        const refresh = () => this._refreshGroups();
+        const title = what => `${group.name || 'Group'} · ${what}`;
+        expander.add_row(this._subpageRow('Add devices', 'A device brings all of its entities',
+            () => this._pushSubpage(title('Add devices'), () => [this._deviceChoiceGroup(group, save)], refresh)));
+        expander.add_row(this._subpageRow('Add single entities', 'Entities without their whole device',
+            () => this._pushSubpage(title('Add single entities'), () => [this._entityChoiceGroup(group, save)], refresh)));
+        expander.add_row(this._subpageRow('Members', 'Devices and entities in menu order; choose what each device shows',
+            () => this._pushSubpage(title('Members'), render => [this._membersGroup(group, save, render)], refresh)));
+        return expander;
+    }
 
-        const toggleMember = (list, id, active) => {
-            const set = new Set(group[list]);
-            active ? set.add(id) : set.delete(id);
-            group[list] = [...set];
-            save();
-            renderMembers();
-        };
+    _toggleMember(group, list, id, active, save) {
+        const set = new Set(group[list]);
+        active ? set.add(id) : set.delete(id);
+        group[list] = [...set];
+        save();
+    }
 
+    _deviceChoiceGroup(group, save) {
+        const list = new Adw.PreferencesGroup({description: 'A device brings all of its entities; choose which ones show under Members.'});
         const deviceIds = [...this._client.devices.keys()]
             .filter(id => E.deviceEntities(this._client, id).length)
             .sort((a, b) => (this._client.devices.get(a)?.name ?? '').localeCompare(this._client.devices.get(b)?.name ?? ''));
-        const deviceRow = new Adw.ExpanderRow({title: 'Add devices', subtitle: 'A device brings all of its entities'});
-        this._trackExpanded(deviceRow, `group-devices:${group.id}`);
         for (const deviceId of deviceIds) {
             const device = this._client.devices.get(deviceId);
             const area = device?.areaId ? this._client.areas.get(device.areaId)?.name : null;
@@ -557,24 +583,33 @@ export default class HaQuickSettingsPreferences extends ExtensionPreferences {
                 subtitle: escape([area, `${E.deviceEntities(this._client, deviceId).length} entities`].filter(Boolean).join(' · ')),
                 active: group.devices.includes(deviceId),
             });
-            row.connect('notify::active', () => toggleMember('devices', deviceId, row.active));
-            deviceRow.add_row(row);
+            row.connect('notify::active', () => this._toggleMember(group, 'devices', deviceId, row.active, save));
+            list.add(row);
         }
-        expander.add_row(deviceRow);
+        return list;
+    }
 
-        const entityRow = new Adw.ExpanderRow({title: 'Add single entities'});
-        this._trackExpanded(entityRow, `group-entities:${group.id}`);
+    _entityChoiceGroup(group, save) {
+        const list = new Adw.PreferencesGroup();
         for (const id of this._entitiesSorted(id => !this._client.entities.get(id)?.category)) {
             const row = new Adw.SwitchRow({
                 title: escape(E.friendlyName(this._client, id)),
                 subtitle: escape(this._entitySubtitle(id)),
                 active: group.entities.includes(id),
             });
-            row.connect('notify::active', () => toggleMember('entities', id, row.active));
-            entityRow.add_row(row);
+            row.connect('notify::active', () => this._toggleMember(group, 'entities', id, row.active, save));
+            list.add(row);
         }
-        expander.add_row(entityRow);
-        return expander;
+        return list;
+    }
+
+    _membersGroup(group, save, render) {
+        const list = new Adw.PreferencesGroup({description: 'Drag to set the menu order. Open a device to choose which of its entities show.'});
+        const refs = E.groupMemberRefs(group);
+        if (!refs.length)
+            list.add(new Adw.ActionRow({title: 'No members yet', subtitle: 'Use Add devices or Add single entities.', activatable: false}));
+        refs.forEach(ref => list.add(this._memberRow(group, ref, save, render)));
+        return list;
     }
 
     _memberRow(group, ref, save, render) {
