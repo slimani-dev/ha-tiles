@@ -62,20 +62,26 @@ class HaTile extends QuickMenuToggle {
             open(animate);
         };
 
-        this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
-        this.menu.addAction('Settings', () => ctx.openPreferences());
-
-        // Header button instead of a menu row, to leave the height to the list
-        this._openButton = new St.Button({
-            style_class: 'icon-button haqs-header-button',
-            child: new St.Icon({gicon: ctx.icons.lookup('open-in-new')}),
-            accessible_name: 'Open Home Assistant',
-            can_focus: true,
+        // Header buttons instead of menu rows, to leave the height to the list
+        this._headerButtons = new St.BoxLayout({
+            style_class: 'haqs-header-buttons',
             x_expand: true,
             x_align: Clutter.ActorAlign.END,
             y_align: Clutter.ActorAlign.CENTER,
         });
-        this._openButton.connect('clicked', () => ctx.openHomeAssistant());
+        for (const [icon, name, action] of [
+            ['open-in-new', 'Open Home Assistant', () => ctx.openHomeAssistant()],
+            ['cog', 'Settings', () => ctx.openPreferences()],
+        ]) {
+            const headerButton = new St.Button({
+                style_class: 'icon-button haqs-header-button',
+                child: new St.Icon({gicon: ctx.icons.lookup(icon)}),
+                accessible_name: name,
+                can_focus: true,
+            });
+            headerButton.connect('clicked', action);
+            this._headerButtons.add_child(headerButton);
+        }
 
         this.rebuild();
     }
@@ -217,8 +223,8 @@ class HaTile extends QuickMenuToggle {
             ? (this._toggleIds.length ? `${lightsOn} of ${this._toggleIds.length} lights on` : '')
             : subtitle;
         this.menu.setHeader(gicon, this._config.title || 'Home Assistant', menuSubtitle);
-        if (!this._openButton.get_parent())
-            this.menu.addHeaderSuffix(this._openButton);
+        if (!this._headerButtons.get_parent())
+            this.menu.addHeaderSuffix(this._headerButtons);
     }
 
     _onClicked() {

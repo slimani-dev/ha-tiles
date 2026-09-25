@@ -87,6 +87,10 @@
   spacing: 12px;
 }
 
+.haqs-header-buttons {
+  spacing: 6px;
+}
+
 .haqs-header-button {
   padding: 8px;
 }
