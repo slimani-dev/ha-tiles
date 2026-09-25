@@ -387,7 +387,8 @@ export default class HaTilesPreferences extends ExtensionPreferences {
         });
         const add = new Adw.ButtonRow({title: 'Add tile'});
         add.connect('activated', () => {
-            const tile = {id: newId(), title: 'New tile', icon: 'auto', primary: '', sections: 'all', wide: false, indicator: false};
+            // No sections until the user picks some; the tile has no menu until then
+            const tile = {id: newId(), title: 'New tile', icon: 'auto', primary: '', sections: [], wide: false, indicator: false};
             tiles.push(tile);
             this._expanded.add(`tile:${tile.id}`);
             save();

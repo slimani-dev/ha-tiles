@@ -146,11 +146,9 @@ class HaTile extends QuickMenuToggle {
             }
         });
 
-        if (!sections.length && client.state === State.CONNECTED) {
-            const empty = new PopupMenu.PopupMenuItem('Nothing to show. Choose sections in Settings.');
-            empty.reactive = false;
-            this._section.addMenuItem(empty);
-        }
+        // Without sections there is nothing to open: hide the menu arrow. Before the
+        // registry loads, keep it for tiles that have sections configured.
+        this.menuEnabled = client.registryLoaded ? sections.length > 0 : this._sectionRefs().length > 0;
         this.sync();
     }
 
