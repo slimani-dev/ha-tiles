@@ -223,8 +223,12 @@ class HaTile extends QuickMenuToggle {
             ? (this._toggleIds.length ? `${lightsOn} of ${this._toggleIds.length} lights on` : '')
             : subtitle;
         this.menu.setHeader(gicon, this._config.title || 'Home Assistant', menuSubtitle);
-        if (!this._headerButtons.get_parent())
+        if (!this._headerButtons.get_parent()) {
             this.menu.addHeaderSuffix(this._headerButtons);
+            // The header keeps an expanding spacer after the suffix; hide it so
+            // the buttons, not the spacer, take the free width and sit at the end
+            this.menu._headerSpacer?.hide();
+        }
     }
 
     _onClicked() {
