@@ -16,8 +16,8 @@
 }
 
 .haqs-device-header {
-  padding-top: 3px;
-  padding-bottom: 0;
+  padding-top: 6px;
+  padding-bottom: 2px;
   font-size: 0.85em;
   font-weight: bold;
   color: rgba(255, 255, 255, 0.55);
@@ -95,4 +95,19 @@
 
 .haqs-header-button {
   padding: 8px;
+}
+
+/* Smaller than GNOME's 46x26 switch */
+.haqs-switch {
+  width: 36px;
+}
+
+.haqs-switch .handle {
+  width: 14px;
+  height: 14px;
+  margin: 3px;
+}
+
+.haqs-switch StIcon {
+  icon-size: 10px;
 }

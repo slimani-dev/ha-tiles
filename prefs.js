@@ -6,8 +6,10 @@
  */
 
 import Adw from 'gi://Adw';
+import Gdk from 'gi://Gdk';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
+import GObject from 'gi://GObject';
 import Gtk from 'gi://Gtk';
 
 import {ExtensionPreferences} from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
@@ -58,6 +60,37 @@ function smartHomeConnections() {
     return [];
 }
 
+const escape = text => GLib.markup_escape_text(text, -1);
+
+// Drag-and-drop reordering within one list. The drag carries "<scope>\n<ref>" so
+// rows only accept drops from their own list (tiles, a tile's sections, a group's members).
+function makeReorderable(row, scope, ref, onMove) {
+    row.add_prefix(new Gtk.Image({icon_name: 'list-drag-handle-symbolic', css_classes: ['dim-label']}));
+
+    const source = new Gtk.DragSource({actions: Gdk.DragAction.MOVE});
+    source.connect('prepare', () => Gdk.ContentProvider.new_for_value(`${scope}\n${ref}`));
+    source.connect('drag-begin', src => src.set_icon(new Gtk.WidgetPaintable({widget: row}), 0, 0));
+    row.add_controller(source);
+
+    const target = Gtk.DropTarget.new(GObject.TYPE_STRING, Gdk.DragAction.MOVE);
+    target.connect('drop', (_target, value) => {
+        const [fromScope, fromRef] = value.split('\n');
+        if (fromScope !== scope || fromRef === ref)
+            return false;
+        onMove(fromRef, ref);
+        return true;
+    });
+    row.add_controller(target);
+}
+
+// Move `from` to where `to` is: after it when dragging down, before it when dragging up
+function moveRef(list, from, to) {
+    const result = list.filter(r => r !== from);
+    const at = result.indexOf(to);
+    result.splice(list.indexOf(from) < list.indexOf(to) ? at + 1 : at, 0, from);
+    return result;
+}
+
 function button(label, {icon = null, css = []} = {}) {
     const b = icon
         ? new Gtk.Button({icon_name: icon, tooltip_text: label, valign: Gtk.Align.CENTER})
@@ -91,6 +124,7 @@ export default class HaQuickSettingsPreferences extends ExtensionPreferences {
         window.add(this._displayPage);
 
         this._dynamicGroups = new Map();
+        this._expanded = new Set(); // expander rows kept open across rebuilds
         this._refreshAll();
         this._connect();
     }
@@ -129,6 +163,13 @@ export default class HaQuickSettingsPreferences extends ExtensionPreferences {
         const areaId = E.entityAreaId(this._client, id);
         const area = areaId ? this._client.areas.get(areaId)?.name : null;
         return area ? `${id} · ${area}` : id;
+    }
+
+    _trackExpanded(row, key) {
+        row.expanded = this._expanded.has(key);
+        row.connect('notify::expanded', () => {
+            row.expanded ? this._expanded.add(key) : this._expanded.delete(key);
+        });
     }
 
     _load(key) {
@@ -228,15 +269,18 @@ export default class HaQuickSettingsPreferences extends ExtensionPreferences {
     _refreshTiles() {
         const tiles = this._load('tiles');
         const groups = [];
+        const save = () => this._save('tiles', tiles);
 
         const list = new Adw.PreferencesGroup({
             title: 'Quick Settings tiles',
-            description: 'Each tile is a button in Quick Settings. Its arrow opens a menu with the sections you choose.',
+            description: 'Each tile is a button in Quick Settings; its arrow opens a menu with the sections you choose. Drag tiles to reorder them.',
         });
         const add = button('Add tile', {icon: 'list-add-symbolic'});
         add.connect('clicked', () => {
-            tiles.push({id: newId(), title: 'New tile', icon: 'auto', primary: '', sections: 'all', wide: false, indicator: false});
-            this._save('tiles', tiles);
+            const tile = {id: newId(), title: 'New tile', icon: 'auto', primary: '', sections: 'all', wide: false, indicator: false};
+            tiles.push(tile);
+            this._expanded.add(`tile:${tile.id}`);
+            save();
             this._refreshTiles();
         });
         list.set_header_suffix(add);
@@ -249,40 +293,37 @@ export default class HaQuickSettingsPreferences extends ExtensionPreferences {
                 activatable: false,
             }));
         }
-        tiles.forEach((tile, index) => list.add(this._tileRow(tiles, tile, index)));
+        for (const tile of tiles) {
+            const row = this._tileRow(tiles, tile, save);
+            makeReorderable(row, 'tiles', tile.id, (from, to) => {
+                const ids = moveRef(tiles.map(t => t.id), from, to);
+                tiles.sort((a, b) => ids.indexOf(a.id) - ids.indexOf(b.id));
+                save();
+                this._refreshTiles();
+            });
+            list.add(row);
+        }
 
         if (!this._ready)
             groups.push(this._notConnectedGroup('main entities and sections'));
         this._replaceGroups(this._tilesPage, 'tiles', groups);
     }
 
-    _tileRow(tiles, tile, index) {
-        const save = () => this._save('tiles', tiles);
-        const expander = new Adw.ExpanderRow({title: GLib.markup_escape_text(tile.title || 'Untitled', -1), subtitle: this._tileSummary(tile)});
+    _tileRow(tiles, tile, save) {
+        const expander = new Adw.ExpanderRow({title: escape(tile.title || 'Untitled'), subtitle: this._tileSummary(tile)});
+        this._trackExpanded(expander, `tile:${tile.id}`);
         const resummarize = () => {
-            expander.title = GLib.markup_escape_text(tile.title || 'Untitled', -1);
+            expander.title = escape(tile.title || 'Untitled');
             expander.subtitle = this._tileSummary(tile);
         };
 
-        // Reorder and delete
-        const up = button('Move up', {icon: 'go-up-symbolic'});
-        const down = button('Move down', {icon: 'go-down-symbolic'});
         const del = button('Remove tile', {icon: 'user-trash-symbolic'});
-        up.sensitive = index > 0;
-        down.sensitive = index < tiles.length - 1;
-        const move = delta => {
-            tiles.splice(index + delta, 0, ...tiles.splice(index, 1));
-            save();
-            this._refreshTiles();
-        };
-        up.connect('clicked', () => move(-1));
-        down.connect('clicked', () => move(1));
         del.connect('clicked', () => {
-            tiles.splice(index, 1);
+            tiles.splice(tiles.indexOf(tile), 1);
             save();
             this._refreshTiles();
         });
-        [up, down, del].forEach(b => expander.add_suffix(b));
+        expander.add_suffix(del);
 
         const title = new Adw.EntryRow({title: 'Name', text: tile.title ?? ''});
         title.connect('changed', () => {
@@ -315,39 +356,7 @@ export default class HaQuickSettingsPreferences extends ExtensionPreferences {
                 resummarize();
             });
             expander.add_row(primary);
-
-            const groups = this._load('groups');
-            const sections = E.allSections(this._client, groups);
-            const all = new Adw.SwitchRow({title: 'All sections', subtitle: 'Every area and custom group, including new ones', active: tile.sections === 'all'});
-            expander.add_row(all);
-            const sectionRows = sections.map(section => {
-                const selected = Array.isArray(tile.sections) ? tile.sections.includes(section.ref) : true;
-                const row = new Adw.SwitchRow({
-                    title: GLib.markup_escape_text(section.name, -1),
-                    subtitle: section.ref.startsWith('group:') ? 'Custom group' : section.ref === 'unassigned' ? 'Entities without an area' : 'Area',
-                    active: selected,
-                    sensitive: tile.sections !== 'all',
-                });
-                row.connect('notify::active', () => {
-                    if (tile.sections === 'all')
-                        return;
-                    // Keep HA/section order regardless of click order
-                    tile.sections = sections.filter((s, i) => sectionRows[i].active).map(s => s.ref);
-                    save();
-                    resummarize();
-                });
-                expander.add_row(row);
-                return row;
-            });
-            all.connect('notify::active', () => {
-                tile.sections = all.active ? 'all' : sections.map(s => s.ref);
-                sectionRows.forEach(r => {
-                    r.sensitive = !all.active;
-                    r.active = true;
-                });
-                save();
-                resummarize();
-            });
+            expander.add_row(this._tileSectionsRow(tile, save, resummarize));
         }
 
         const wide = new Adw.SwitchRow({title: 'Wide tile', subtitle: 'Span both Quick Settings columns', active: !!tile.wide});
@@ -366,12 +375,71 @@ export default class HaQuickSettingsPreferences extends ExtensionPreferences {
         return expander;
     }
 
+    // Which sections the tile shows, in menu order; drag to reorder
+    _tileSectionsRow(tile, save, resummarize) {
+        const sections = E.allSections(this._client, this._load('groups'));
+        const allRefs = sections.map(s => s.ref);
+        const byRef = new Map(sections.map(s => [s.ref, s]));
+
+        const expander = new Adw.ExpanderRow({title: 'Sections', subtitle: 'Drag to set the menu order'});
+        this._trackExpanded(expander, `tile-sections:${tile.id}`);
+
+        let syncing = false;
+        const allRow = new Adw.SwitchRow({
+            title: 'All sections',
+            subtitle: 'Includes areas and groups added later',
+            active: tile.sections === 'all',
+        });
+        expander.add_row(allRow);
+
+        const rows = new Map();
+        const selected = () => tile.sections === 'all' ? [...allRefs] : [...tile.sections];
+        for (const ref of E.orderRefs(allRefs, tile.sectionOrder)) {
+            const section = byRef.get(ref);
+            const row = new Adw.SwitchRow({
+                title: escape(section.name),
+                subtitle: ref.startsWith('group:') ? 'Custom group' : ref === 'unassigned' ? 'Entities without an area' : 'Area',
+                active: selected().includes(ref),
+            });
+            row.connect('notify::active', () => {
+                if (syncing)
+                    return;
+                const current = selected();
+                tile.sections = row.active ? [...new Set([...current, ref])] : current.filter(r => r !== ref);
+                syncing = true;
+                allRow.active = false;
+                syncing = false;
+                save();
+                resummarize();
+            });
+            makeReorderable(row, `sections:${tile.id}`, ref, (from, to) => {
+                tile.sectionOrder = moveRef(E.orderRefs(allRefs, tile.sectionOrder), from, to);
+                save();
+                this._refreshTiles();
+            });
+            rows.set(ref, row);
+            expander.add_row(row);
+        }
+
+        allRow.connect('notify::active', () => {
+            if (syncing)
+                return;
+            tile.sections = allRow.active ? 'all' : [...allRefs];
+            syncing = true;
+            rows.forEach(r => (r.active = true));
+            syncing = false;
+            save();
+            resummarize();
+        });
+        return expander;
+    }
+
     _tileSummary(tile) {
         const parts = [];
         if (tile.primary)
             parts.push(this._ready ? E.friendlyName(this._client, tile.primary) : tile.primary);
         parts.push(tile.sections === 'all' ? 'all sections' : `${tile.sections?.length ?? 0} sections`);
-        return GLib.markup_escape_text(parts.join(' · '), -1);
+        return escape(parts.join(' · '));
     }
     //#endregion Tiles page
 
@@ -379,6 +447,7 @@ export default class HaQuickSettingsPreferences extends ExtensionPreferences {
     _refreshGroups() {
         const groups = this._load('groups');
         const result = [];
+        const save = () => this._save('groups', groups);
 
         const list = new Adw.PreferencesGroup({
             title: 'Custom groups',
@@ -388,8 +457,10 @@ export default class HaQuickSettingsPreferences extends ExtensionPreferences {
         });
         const add = button('Add group', {icon: 'list-add-symbolic'});
         add.connect('clicked', () => {
-            groups.push({id: newId(), name: 'New group', icon: 'mdi:group', devices: [], entities: []});
-            this._save('groups', groups);
+            const group = {id: newId(), name: 'New group', icon: 'mdi:group', devices: [], entities: [], order: [], exclude: []};
+            groups.push(group);
+            this._expanded.add(`group:${group.id}`);
+            save();
             this._refreshGroups();
             this._refreshTiles();
         });
@@ -398,21 +469,34 @@ export default class HaQuickSettingsPreferences extends ExtensionPreferences {
 
         if (!groups.length)
             list.add(new Adw.ActionRow({title: 'No custom groups', subtitle: 'Sections follow your Home Assistant areas.', activatable: false}));
-        groups.forEach((group, index) => list.add(this._groupRow(groups, group, index)));
+        for (const group of groups) {
+            const row = this._groupRow(groups, group, save);
+            makeReorderable(row, 'groups', group.id, (from, to) => {
+                const ids = moveRef(groups.map(g => g.id), from, to);
+                groups.sort((a, b) => ids.indexOf(a.id) - ids.indexOf(b.id));
+                save();
+                this._refreshGroups();
+                this._refreshTiles();
+            });
+            list.add(row);
+        }
 
         if (!this._ready)
             result.push(this._notConnectedGroup('devices and entities'));
         this._replaceGroups(this._groupsPage, 'groups', result);
     }
 
-    _groupRow(groups, group, index) {
-        const save = () => this._save('groups', groups);
-        const summary = () => GLib.markup_escape_text(`${group.devices.length} devices, ${group.entities.length} entities`, -1);
-        const expander = new Adw.ExpanderRow({title: GLib.markup_escape_text(group.name || 'Untitled', -1), subtitle: summary()});
+    _groupRow(groups, group, save) {
+        group.devices ??= [];
+        group.entities ??= [];
+        group.exclude ??= [];
+        const summary = () => escape(`${group.devices.length} devices, ${group.entities.length} entities`);
+        const expander = new Adw.ExpanderRow({title: escape(group.name || 'Untitled'), subtitle: summary()});
+        this._trackExpanded(expander, `group:${group.id}`);
 
         const del = button('Remove group', {icon: 'user-trash-symbolic'});
         del.connect('clicked', () => {
-            groups.splice(index, 1);
+            groups.splice(groups.indexOf(group), 1);
             save();
             this._refreshGroups();
             this._refreshTiles();
@@ -422,7 +506,7 @@ export default class HaQuickSettingsPreferences extends ExtensionPreferences {
         const name = new Adw.EntryRow({title: 'Name', text: group.name ?? ''});
         name.connect('changed', () => {
             group.name = name.text;
-            expander.title = GLib.markup_escape_text(group.name || 'Untitled', -1);
+            expander.title = escape(group.name || 'Untitled');
             save();
         });
         expander.add_row(name);
@@ -437,29 +521,40 @@ export default class HaQuickSettingsPreferences extends ExtensionPreferences {
         if (!this._ready)
             return expander;
 
+        // Members in menu order; drag to reorder, open a device to pick its entities
+        const members = new Adw.ExpanderRow({title: 'Members', subtitle: 'Drag to set the menu order. Open a device to choose what it shows.'});
+        this._trackExpanded(members, `group-members:${group.id}`);
+        let memberRows = [];
+        const renderMembers = () => {
+            memberRows.forEach(r => members.remove(r));
+            memberRows = E.groupMemberRefs(group).map(ref => this._memberRow(group, ref, save, renderMembers));
+            if (!memberRows.length)
+                memberRows.push(new Adw.ActionRow({title: 'No members yet', subtitle: 'Add devices or single entities below.', activatable: false}));
+            memberRows.forEach(r => members.add_row(r));
+            expander.subtitle = summary();
+        };
+        renderMembers();
+        expander.add_row(members);
+
         const toggleMember = (list, id, active) => {
             const set = new Set(group[list]);
             active ? set.add(id) : set.delete(id);
             group[list] = [...set];
             save();
-            expander.subtitle = summary();
+            renderMembers();
         };
 
-        // Devices that have at least one entity, with their entities as the subtitle
-        const deviceEntities = new Map();
-        for (const [id, e] of this._client.entities) {
-            if (e.deviceId && this._client.states.has(id) && !e.category)
-                deviceEntities.set(e.deviceId, [...deviceEntities.get(e.deviceId) ?? [], id]);
-        }
-        const devices = [...deviceEntities.keys()]
+        const deviceIds = [...this._client.devices.keys()]
+            .filter(id => E.deviceEntities(this._client, id).length)
             .sort((a, b) => (this._client.devices.get(a)?.name ?? '').localeCompare(this._client.devices.get(b)?.name ?? ''));
-        const deviceRow = new Adw.ExpanderRow({title: 'Devices', subtitle: 'A device brings all of its entities'});
-        for (const deviceId of devices) {
+        const deviceRow = new Adw.ExpanderRow({title: 'Add devices', subtitle: 'A device brings all of its entities'});
+        this._trackExpanded(deviceRow, `group-devices:${group.id}`);
+        for (const deviceId of deviceIds) {
             const device = this._client.devices.get(deviceId);
             const area = device?.areaId ? this._client.areas.get(device.areaId)?.name : null;
             const row = new Adw.SwitchRow({
-                title: GLib.markup_escape_text(device?.name || deviceId, -1),
-                subtitle: GLib.markup_escape_text([area, `${deviceEntities.get(deviceId).length} entities`].filter(Boolean).join(' · '), -1),
+                title: escape(device?.name || deviceId),
+                subtitle: escape([area, `${E.deviceEntities(this._client, deviceId).length} entities`].filter(Boolean).join(' · ')),
                 active: group.devices.includes(deviceId),
             });
             row.connect('notify::active', () => toggleMember('devices', deviceId, row.active));
@@ -467,11 +562,12 @@ export default class HaQuickSettingsPreferences extends ExtensionPreferences {
         }
         expander.add_row(deviceRow);
 
-        const entityRow = new Adw.ExpanderRow({title: 'Single entities'});
+        const entityRow = new Adw.ExpanderRow({title: 'Add single entities'});
+        this._trackExpanded(entityRow, `group-entities:${group.id}`);
         for (const id of this._entitiesSorted(id => !this._client.entities.get(id)?.category)) {
             const row = new Adw.SwitchRow({
-                title: GLib.markup_escape_text(E.friendlyName(this._client, id), -1),
-                subtitle: GLib.markup_escape_text(this._entitySubtitle(id), -1),
+                title: escape(E.friendlyName(this._client, id)),
+                subtitle: escape(this._entitySubtitle(id)),
                 active: group.entities.includes(id),
             });
             row.connect('notify::active', () => toggleMember('entities', id, row.active));
@@ -479,6 +575,42 @@ export default class HaQuickSettingsPreferences extends ExtensionPreferences {
         }
         expander.add_row(entityRow);
         return expander;
+    }
+
+    _memberRow(group, ref, save, render) {
+        const client = this._client;
+        const id = ref.slice(ref.indexOf(':') + 1);
+        let row;
+        if (ref.startsWith('device:')) {
+            const deviceName = client.devices.get(id)?.name || id;
+            const ids = E.deviceEntities(client, id);
+            const shown = () => `${ids.filter(e => !group.exclude.includes(e)).length} of ${ids.length} entities shown`;
+            row = new Adw.ExpanderRow({title: escape(deviceName), subtitle: shown()});
+            this._trackExpanded(row, `member:${group.id}:${ref}`);
+            for (const entityId of ids) {
+                const entityRow = new Adw.SwitchRow({
+                    title: escape(E.shortName(client, entityId, [deviceName])),
+                    subtitle: escape(entityId),
+                    active: !group.exclude.includes(entityId),
+                });
+                entityRow.connect('notify::active', () => {
+                    const exclude = new Set(group.exclude);
+                    entityRow.active ? exclude.delete(entityId) : exclude.add(entityId);
+                    group.exclude = [...exclude];
+                    row.subtitle = shown();
+                    save();
+                });
+                row.add_row(entityRow);
+            }
+        } else {
+            row = new Adw.ActionRow({title: escape(E.friendlyName(client, id)), subtitle: escape(this._entitySubtitle(id))});
+        }
+        makeReorderable(row, `members:${group.id}`, ref, (from, to) => {
+            group.order = moveRef(E.groupMemberRefs(group), from, to);
+            save();
+            render();
+        });
+        return row;
     }
     //#endregion Groups page
 

@@ -108,10 +108,11 @@ class HaTile extends QuickMenuToggle {
     }
 
     _sectionRefs() {
-        const refs = this._config.sections;
-        if (refs === 'all' || !Array.isArray(refs))
-            return E.allSections(this._ctx.client, this._ctx.settings.groups).map(s => s.ref);
-        return refs;
+        const {sections, sectionOrder} = this._config;
+        const refs = sections === 'all' || !Array.isArray(sections)
+            ? E.allSections(this._ctx.client, this._ctx.settings.groups).map(s => s.ref)
+            : sections;
+        return E.orderRefs(refs, sectionOrder);
     }
 
     _resolve() {
@@ -133,7 +134,7 @@ class HaTile extends QuickMenuToggle {
             const header = new SectionHeaderItem(this._ctx, section);
             this._addItem(header);
 
-            for (const cluster of E.clusterByDevice(client, section.entities)) {
+            for (const cluster of E.clusterByDevice(client, section.entities, section.order)) {
                 if (cluster.deviceId)
                     this._addItem(new DeviceHeaderItem(this._ctx, cluster));
                 for (const id of cluster.entities) {
