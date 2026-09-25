@@ -241,9 +241,9 @@ class HaTile extends QuickMenuToggle {
         this.menu.setHeader(gicon, this._config.title || 'Home Assistant', menuSubtitle);
         if (!this._headerButtons.get_parent()) {
             this.menu.addHeaderSuffix(this._headerButtons);
-            // The header keeps an expanding spacer after the suffix; hide it so
-            // the buttons, not the spacer, take the free width and sit at the end
-            this.menu._headerSpacer?.hide();
+            // The header keeps an expanding spacer after the suffix and has no public
+            // way to right-align it; hide the spacer so the buttons sit at the end
+            this.menu._headerSpacer.hide();
         }
     }
 
@@ -342,6 +342,23 @@ export default class HaTilesExtension extends Extension {
         this._configureClient();
     }
 
+    disable() {
+        if (this._iconRefreshId) {
+            GLib.Source.remove(this._iconRefreshId);
+            this._iconRefreshId = 0;
+        }
+        this._destroyTiles();
+        this._settings.disconnectObject(this);
+        this._client.disconnectObject(this);
+        this._icons.disconnectObject(this);
+        this._client.destroy();
+        this._icons.destroy();
+        this._client = null;
+        this._icons = null;
+        this._ctx = null;
+        this._settings = null;
+    }
+
     _configureClient() {
         this._client.configure(this._settings.get_string('url').trim(), this._settings.get_string('token').trim());
     }
@@ -391,20 +408,4 @@ export default class HaTilesExtension extends Extension {
         });
     }
 
-    disable() {
-        if (this._iconRefreshId) {
-            GLib.Source.remove(this._iconRefreshId);
-            this._iconRefreshId = 0;
-        }
-        this._destroyTiles();
-        this._settings.disconnectObject(this);
-        this._client.disconnectObject(this);
-        this._icons.disconnectObject(this);
-        this._client.destroy();
-        this._icons.destroy();
-        this._client = null;
-        this._icons = null;
-        this._ctx = null;
-        this._settings = null;
-    }
 }
