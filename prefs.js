@@ -62,6 +62,24 @@ function smartHomeConnections() {
 
 const escape = text => GLib.markup_escape_text(text, -1);
 
+const CSS = `
+.haqs-badge {
+    background-color: var(--accent-bg-color);
+    color: var(--accent-fg-color);
+    border-radius: 999px;
+    padding: 2px 9px;
+    font-weight: bold;
+    transition: transform 200ms ease-out, background-color 200ms;
+}
+.haqs-badge.empty {
+    background-color: alpha(currentColor, 0.15);
+    color: inherit;
+}
+.haqs-badge.pulse {
+    transform: scale(1.3);
+}
+`;
+
 // Drag-and-drop reordering within one list. The drag carries "<scope>\n<ref>" so
 // rows only accept drops from their own list (tiles, a tile's sections, a group's members).
 function makeReorderable(row, scope, ref, onMove) {
@@ -110,6 +128,10 @@ export default class HaQuickSettingsPreferences extends ExtensionPreferences {
     fillPreferencesWindow(window) {
         this._settings = this.getSettings();
         this._window = window;
+
+        const css = new Gtk.CssProvider();
+        css.load_from_string(CSS);
+        Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION);
         window.set_default_size(720, 820);
         window.search_enabled = true;
 
@@ -189,8 +211,10 @@ export default class HaQuickSettingsPreferences extends ExtensionPreferences {
         this._window.push_subpage(nav);
     }
 
-    _subpageRow(title, subtitle, onActivate) {
+    _subpageRow(title, subtitle, onActivate, suffix = null) {
         const row = new Adw.ActionRow({title: escape(title), subtitle: escape(subtitle), activatable: true});
+        if (suffix)
+            row.add_suffix(suffix);
         row.add_suffix(new Gtk.Image({icon_name: 'go-next-symbolic'}));
         row.connect('activated', onActivate);
         return row;
@@ -552,25 +576,51 @@ export default class HaQuickSettingsPreferences extends ExtensionPreferences {
         if (!this._ready)
             return expander;
 
+        // Member count badge, updated live while devices and entities are switched on and off
+        const badge = new Gtk.Label({css_classes: ['haqs-badge'], valign: Gtk.Align.CENTER});
+        let pulseId = 0;
+        const updateMembers = (animate = true) => {
+            const count = String(E.groupMemberRefs(group).length);
+            expander.subtitle = summary();
+            if (badge.label === count)
+                return;
+            badge.label = count;
+            count === '0' ? badge.add_css_class('empty') : badge.remove_css_class('empty');
+            if (!animate)
+                return;
+            badge.add_css_class('pulse');
+            if (pulseId)
+                GLib.Source.remove(pulseId);
+            pulseId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 250, () => {
+                pulseId = 0;
+                badge.remove_css_class('pulse');
+                return GLib.SOURCE_REMOVE;
+            });
+        };
+        badge.connect('destroy', () => pulseId && GLib.Source.remove(pulseId));
+        updateMembers(false);
+
         const refresh = () => this._refreshGroups();
         const title = what => `${group.name || 'Group'} · ${what}`;
         expander.add_row(this._subpageRow('Add devices', 'A device brings all of its entities',
-            () => this._pushSubpage(title('Add devices'), () => [this._deviceChoiceGroup(group, save)], refresh)));
+            () => this._pushSubpage(title('Add devices'), () => [this._deviceChoiceGroup(group, save, updateMembers)], refresh)));
         expander.add_row(this._subpageRow('Add single entities', 'Entities without their whole device',
-            () => this._pushSubpage(title('Add single entities'), () => [this._entityChoiceGroup(group, save)], refresh)));
+            () => this._pushSubpage(title('Add single entities'), () => [this._entityChoiceGroup(group, save, updateMembers)], refresh)));
         expander.add_row(this._subpageRow('Members', 'Devices and entities in menu order; choose what each device shows',
-            () => this._pushSubpage(title('Members'), render => [this._membersGroup(group, save, render)], refresh)));
+            () => this._pushSubpage(title('Members'), render => [this._membersGroup(group, save, render)], refresh),
+            badge));
         return expander;
     }
 
-    _toggleMember(group, list, id, active, save) {
+    _toggleMember(group, list, id, active, save, onChange) {
         const set = new Set(group[list]);
         active ? set.add(id) : set.delete(id);
         group[list] = [...set];
         save();
+        onChange();
     }
 
-    _deviceChoiceGroup(group, save) {
+    _deviceChoiceGroup(group, save, onChange) {
         const list = new Adw.PreferencesGroup({description: 'A device brings all of its entities; choose which ones show under Members.'});
         const deviceIds = [...this._client.devices.keys()]
             .filter(id => E.deviceEntities(this._client, id).length)
@@ -583,13 +633,13 @@ export default class HaQuickSettingsPreferences extends ExtensionPreferences {
                 subtitle: escape([area, `${E.deviceEntities(this._client, deviceId).length} entities`].filter(Boolean).join(' · ')),
                 active: group.devices.includes(deviceId),
             });
-            row.connect('notify::active', () => this._toggleMember(group, 'devices', deviceId, row.active, save));
+            row.connect('notify::active', () => this._toggleMember(group, 'devices', deviceId, row.active, save, onChange));
             list.add(row);
         }
         return list;
     }
 
-    _entityChoiceGroup(group, save) {
+    _entityChoiceGroup(group, save, onChange) {
         const list = new Adw.PreferencesGroup();
         for (const id of this._entitiesSorted(id => !this._client.entities.get(id)?.category)) {
             const row = new Adw.SwitchRow({
@@ -597,7 +647,7 @@ export default class HaQuickSettingsPreferences extends ExtensionPreferences {
                 subtitle: escape(this._entitySubtitle(id)),
                 active: group.entities.includes(id),
             });
-            row.connect('notify::active', () => this._toggleMember(group, 'entities', id, row.active, save));
+            row.connect('notify::active', () => this._toggleMember(group, 'entities', id, row.active, save, onChange));
             list.add(row);
         }
         return list;
