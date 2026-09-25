@@ -415,7 +415,7 @@ export default class HaTilesPreferences extends ExtensionPreferences {
         list.add(add);
 
         if (!this._ready)
-            groups.push(this._notConnectedGroup('main entities and sections'));
+            groups.push(this._notConnectedGroup('what tile buttons switch, and sections'));
         this._replaceGroups(this._tilesPage, 'tiles', groups);
     }
 
@@ -451,15 +451,26 @@ export default class HaTilesPreferences extends ExtensionPreferences {
         expander.add_row(icon);
 
         if (this._ready) {
-            // Entities hidden in Home Assistant (e.g. the switch behind a light) only clutter the list
-            const candidates = this._entitiesSorted(id => MAIN_ENTITY_DOMAINS.has(E.domainOf(id)) &&
+            // Areas, then devices, then single entities. Entities hidden in Home Assistant
+            // (e.g. the switch behind a light) only clutter the list.
+            const {areas, devices} = E.targetCandidates(this._client);
+            const entities = this._entitiesSorted(id => MAIN_ENTITY_DOMAINS.has(E.domainOf(id)) &&
                 (!this._client.entities.get(id)?.hidden || id === tile.primary));
-            // Each item is "name\tentity id"; search matches either part
-            const items = ['None — the tile switches its lights\t',
-                ...candidates.map(id => `${E.friendlyName(this._client, id)}\t${id}`)];
+            const count = ids => {
+                const noun = ids.every(id => E.domainOf(id) === 'light') ? 'light' : 'entity';
+                return `${ids.length} ${ids.length === 1 ? noun : noun === 'light' ? 'lights' : 'entities'}`;
+            };
+            const refs = ['', ...areas.map(a => a.ref), ...devices.map(d => d.ref), ...entities];
+            // Each item is "name\tsecond line"; search matches either part
+            const items = [
+                'None — the tile switches its lights\t',
+                ...areas.map(a => `${a.name}\tArea · ${count(a.ids)}`),
+                ...devices.map(d => `${d.name}\tDevice · ${count(d.ids)}`),
+                ...entities.map(id => `${E.friendlyName(this._client, id)}\t${id}`),
+            ];
             const primary = new Adw.ComboRow({
-                title: 'Main entity',
-                subtitle: 'What the tile button toggles. With "auto", the tile uses this entity\'s area icon.',
+                title: 'Tile button',
+                subtitle: 'What clicking the tile switches: an area, a device or a single entity. With icon "auto", the tile uses its area icon.',
                 model: Gtk.StringList.new(items),
                 enable_search: true,
                 // Search needs to know which text to match; StringList items expose it as "string"
@@ -467,10 +478,17 @@ export default class HaTilesPreferences extends ExtensionPreferences {
                 search_match_mode: Gtk.StringFilterMatchMode.SUBSTRING,
                 factory: entityItemFactory(false),
                 list_factory: entityItemFactory(true),
-                selected: Math.max(0, candidates.indexOf(tile.primary) + 1),
+                selected: Math.max(0, refs.indexOf(tile.primary)),
             });
             primary.connect('notify::selected', () => {
-                tile.primary = primary.selected > 0 ? candidates[primary.selected - 1] : '';
+                // The name follows the target while it is still the default or the previous
+                // target's name; a name the user typed is kept
+                const previous = tile.primary ? E.resolveTarget(this._client, tile.primary).name : null;
+                tile.primary = refs[primary.selected] ?? '';
+                if (!tile.title || tile.title === 'New tile' || tile.title === previous) {
+                    tile.title = tile.primary ? E.resolveTarget(this._client, tile.primary).name : 'New tile';
+                    title.text = tile.title;
+                }
                 save();
                 resummarize();
             });
@@ -556,7 +574,7 @@ export default class HaTilesPreferences extends ExtensionPreferences {
     _tileSummary(tile) {
         const parts = [];
         if (tile.primary)
-            parts.push(this._ready ? E.friendlyName(this._client, tile.primary) : tile.primary);
+            parts.push(this._ready ? E.resolveTarget(this._client, tile.primary).name : tile.primary);
         parts.push(tile.sections === 'all' ? 'all sections' : `${tile.sections?.length ?? 0} sections`);
         return escape(parts.join(' · '));
     }
@@ -640,10 +658,31 @@ export default class HaTilesPreferences extends ExtensionPreferences {
         if (!this._ready)
             return expander;
 
+        // The name follows the group's only member while it is still "New group" or that
+        // automatic name; a name the user typed is kept
+        const autoName = () => {
+            if (!this._ready)
+                return null;
+            const refs = E.groupMemberRefs(group);
+            if (refs.length !== 1)
+                return null;
+            const id = refs[0].slice(refs[0].indexOf(':') + 1);
+            return refs[0].startsWith('device:') ? this._client.devices.get(id)?.name ?? null : E.friendlyName(this._client, id);
+        };
+        let lastAutoName = autoName();
+
         // Member count badge, updated live while devices and entities are switched on and off
         const badge = new Gtk.Label({css_classes: ['haqs-badge'], valign: Gtk.Align.CENTER});
         let pulseId = 0;
         const updateMembers = (animate = true) => {
+            if (animate) {
+                const next = autoName();
+                if (next && (!group.name || group.name === 'New group' || group.name === lastAutoName)) {
+                    group.name = next;
+                    name.text = group.name;
+                    lastAutoName = next;
+                }
+            }
             const count = String(E.groupMemberRefs(group).length);
             expander.subtitle = summary();
             if (badge.label === count)

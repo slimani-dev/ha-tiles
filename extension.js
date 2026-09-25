@@ -189,13 +189,11 @@ class HaTile extends QuickMenuToggle {
         const {icon, primary} = this._config;
         if (icon && icon !== 'auto')
             return icon.replace(/^mdi:/, '');
-        if (primary) {
-            const areaId = E.entityAreaId(client, primary);
-            if (areaId && client.areas.get(areaId)?.icon)
-                return E.areaIconOf(client, areaId);
-            if (client.states.has(primary))
-                return E.entityIcon(client, primary);
-        }
+        const target = E.resolveTarget(client, primary);
+        if (target?.areaId && client.areas.get(target.areaId)?.icon)
+            return E.areaIconOf(client, target.areaId);
+        if (target?.ids.length)
+            return E.entityIcon(client, target.ids[0]);
         return 'home-assistant';
     }
 
@@ -208,15 +206,21 @@ class HaTile extends QuickMenuToggle {
         this.gicon = gicon;
 
         const lightsOn = this._toggleIds.filter(id => E.isOn(client.states.get(id))).length;
+        const target = E.resolveTarget(client, primary);
+        const targetOn = target?.ids.filter(id => E.isOn(client.states.get(id))).length ?? 0;
         let subtitle;
         if (!connected)
             subtitle = client.state === State.AUTH_FAILED ? 'Login failed' : client.state === State.IDLE ? 'Not set up' : 'Connecting…';
-        else if (primary)
-            subtitle = E.stateLabel(client, primary);
+        else if (target && !target.ids.length)
+            subtitle = 'Unavailable';
+        else if (target?.ids.length === 1)
+            subtitle = E.stateLabel(client, target.ids[0]);
+        else if (target)
+            subtitle = targetOn ? `${targetOn} of ${target.ids.length} on` : 'Off';
         else
             subtitle = lightsOn ? `${lightsOn} on` : 'All off';
 
-        this.checked = connected && (primary ? E.isOn(client.states.get(primary)) : lightsOn > 0);
+        this.checked = connected && (target ? targetOn > 0 : lightsOn > 0);
         this.subtitle = subtitle;
         this.reactive = connected;
 
@@ -234,18 +238,20 @@ class HaTile extends QuickMenuToggle {
 
     _onClicked() {
         const {client} = this._ctx;
-        const {primary} = this._config;
-        if (primary) {
-            const on = E.isOn(client.states.get(primary));
-            this.checked = !on; // optimistic
-            client.callService('homeassistant', on ? 'turn_off' : 'turn_on', primary);
-        } else if (this._toggleIds.length) {
-            // Without a main entity, the tile switches this tile's lights only
-            const anyOn = this._toggleIds.some(id => E.isOn(client.states.get(id)));
-            this.checked = !anyOn;
-            client.callService('light', anyOn ? 'turn_off' : 'turn_on', this._toggleIds);
-        }
+        const target = E.resolveTarget(client, this._config.primary);
+        // An area or device switches together: all off if any is on, otherwise all on.
+        // Without a target, the tile switches the lights in its sections.
+        const ids = target ? target.ids : this._toggleIds;
+        if (!ids.length)
+            return;
+        const anyOn = ids.some(id => E.isOn(client.states.get(id)));
+        this.checked = !anyOn; // optimistic
+        if (target)
+            client.callService('homeassistant', anyOn ? 'turn_off' : 'turn_on', ids);
+        else
+            client.callService('light', anyOn ? 'turn_off' : 'turn_on', ids);
     }
+
 });
 
 const HaIndicator = GObject.registerClass(
