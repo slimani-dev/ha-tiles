@@ -106,6 +106,37 @@ function makeReorderable(row, scope, ref, onMove) {
     row.add_controller(target);
 }
 
+// Items for entity drop-downs: "name\tentity id". The selected value shows the name;
+// the open list shows the full name with the entity id underneath.
+function entityItemFactory(inList) {
+    const factory = new Gtk.SignalListItemFactory();
+    factory.connect('setup', (_f, item) => {
+        const box = new Gtk.Box({orientation: Gtk.Orientation.VERTICAL, spacing: 2});
+        const name = new Gtk.Label({xalign: 0});
+        if (inList) {
+            name.set({wrap: true, max_width_chars: 40, width_chars: 28});
+            const id = new Gtk.Label({xalign: 0, css_classes: ['dim-label', 'caption']});
+            box.append(name);
+            box.append(id);
+        } else {
+            name.set({ellipsize: 3 /* Pango.EllipsizeMode.END */, max_width_chars: 24});
+            box.append(name);
+        }
+        item.child = box;
+    });
+    factory.connect('bind', (_f, item) => {
+        const [name, id] = item.item.string.split('\t');
+        const box = item.child;
+        box.get_first_child().label = name;
+        const idLabel = box.get_first_child().get_next_sibling();
+        if (idLabel) {
+            idLabel.label = id;
+            idLabel.visible = !!id;
+        }
+    });
+    return factory;
+}
+
 // A search entry that filters rows by title and subtitle
 function searchGroup(rows) {
     const group = new Adw.PreferencesGroup();
@@ -420,13 +451,22 @@ export default class HaTilesPreferences extends ExtensionPreferences {
         expander.add_row(icon);
 
         if (this._ready) {
-            const candidates = this._entitiesSorted(id => MAIN_ENTITY_DOMAINS.has(E.domainOf(id)));
-            const labels = ['None — the tile switches its lights', ...candidates.map(id => `${E.friendlyName(this._client, id)}  (${id})`)];
+            // Entities hidden in Home Assistant (e.g. the switch behind a light) only clutter the list
+            const candidates = this._entitiesSorted(id => MAIN_ENTITY_DOMAINS.has(E.domainOf(id)) &&
+                (!this._client.entities.get(id)?.hidden || id === tile.primary));
+            // Each item is "name\tentity id"; search matches either part
+            const items = ['None — the tile switches its lights\t',
+                ...candidates.map(id => `${E.friendlyName(this._client, id)}\t${id}`)];
             const primary = new Adw.ComboRow({
                 title: 'Main entity',
                 subtitle: 'What the tile button toggles. With "auto", the tile uses this entity\'s area icon.',
-                model: Gtk.StringList.new(labels),
+                model: Gtk.StringList.new(items),
                 enable_search: true,
+                // Search needs to know which text to match; StringList items expose it as "string"
+                expression: new Gtk.PropertyExpression(Gtk.StringObject, null, 'string'),
+                search_match_mode: Gtk.StringFilterMatchMode.SUBSTRING,
+                factory: entityItemFactory(false),
+                list_factory: entityItemFactory(true),
                 selected: Math.max(0, candidates.indexOf(tile.primary) + 1),
             });
             primary.connect('notify::selected', () => {
