@@ -5,6 +5,7 @@
  * SPDX-License-Identifier: GPL-2.0-or-later
  */
 
+import Clutter from 'gi://Clutter';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import GObject from 'gi://GObject';
@@ -62,11 +63,19 @@ class HaTile extends QuickMenuToggle {
         };
 
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
-        this._statusItem = this.menu.addAction('', () => {});
-        this._statusItem.reactive = false;
-        this._statusItem.add_style_class_name('haqs-status');
-        this.menu.addAction('Open Home Assistant', () => ctx.openHomeAssistant());
         this.menu.addAction('Settings', () => ctx.openPreferences());
+
+        // Header button instead of a menu row, to leave the height to the list
+        this._openButton = new St.Button({
+            style_class: 'icon-button haqs-header-button',
+            child: new St.Icon({gicon: ctx.icons.lookup('open-in-new')}),
+            accessible_name: 'Open Home Assistant',
+            can_focus: true,
+            x_expand: true,
+            x_align: Clutter.ActorAlign.END,
+            y_align: Clutter.ActorAlign.CENTER,
+        });
+        this._openButton.connect('clicked', () => ctx.openHomeAssistant());
 
         this.rebuild();
     }
@@ -208,9 +217,8 @@ class HaTile extends QuickMenuToggle {
             ? (this._toggleIds.length ? `${lightsOn} of ${this._toggleIds.length} lights on` : '')
             : subtitle;
         this.menu.setHeader(gicon, this._config.title || 'Home Assistant', menuSubtitle);
-        this._statusItem.label.text = connected
-            ? `Connected to ${client.config?.location_name ?? 'Home Assistant'}`
-            : subtitle;
+        if (!this._openButton.get_parent())
+            this.menu.addHeaderSuffix(this._openButton);
     }
 
     _onClicked() {
