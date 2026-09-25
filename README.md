@@ -37,7 +37,7 @@ single entity, open its arrow for a menu of everything in the sections you picke
 
 <p align="center">
   <img src="docs/screenshots/color-wheel.png" width="32%" alt="Color wheel for a group of color lights">
-  <img src="docs/screenshots/tile-button-search.png" width="64%" alt="Choosing what a tile button switches, with search">
+  <img src="docs/screenshots/tile-button-search.png" width="32%" alt="Choosing what a tile button switches, with search">
 </p>
 
 ## Requirements
