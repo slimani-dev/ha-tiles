@@ -1,0 +1,10 @@
+{
+  "uuid": "ha-quick-settings@slimani.dev",
+  "name": "Home Assistant Quick Settings",
+  "description": "Control Home Assistant from GNOME Quick Settings. Live updates over a single WebSocket subscription, Home Assistant areas and icons, custom groups, and controls that follow what each device supports: switches, brightness, color, color temperature, covers, fans, numbers and sensors.",
+  "shell-version": ["48", "49", "50", "51"],
+  "settings-schema": "org.gnome.shell.extensions.ha-quick-settings",
+  "gettext-domain": "ha-quick-settings",
+  "url": "https://github.com/slimani-dev/ha-quick-settings",
+  "version": 1
+}

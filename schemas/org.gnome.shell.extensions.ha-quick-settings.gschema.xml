@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.gnome.shell.extensions.ha-quick-settings" path="/org/gnome/shell/extensions/ha-quick-settings/">
+    <key name="url" type="s">
+      <default>''</default>
+      <summary>Home Assistant URL</summary>
+      <description>Base URL, for example https://homeassistant.local:8123</description>
+    </key>
+    <key name="token" type="s">
+      <default>''</default>
+      <summary>Long-lived access token</summary>
+    </key>
+    <key name="tiles" type="s">
+      <default>'[]'</default>
+      <summary>Quick Settings tiles (JSON)</summary>
+      <description>List of {id, title, icon, primary, sections, wide, indicator}. icon is "auto" or "mdi:name"; sections are "area:ID", "group:ID", or "unassigned".</description>
+    </key>
+    <key name="groups" type="s">
+      <default>'[]'</default>
+      <summary>Custom groups (JSON)</summary>
+      <description>List of {id, name, icon, devices, entities}. Members of a custom group are not shown in their Home Assistant area.</description>
+    </key>
+    <key name="domains" type="as">
+      <default>['light', 'switch', 'fan', 'cover', 'scene', 'script', 'input_boolean', 'lock']</default>
+      <summary>Entity types shown in area sections</summary>
+      <description>Custom groups show every entity type of their members.</description>
+    </key>
+    <key name="hidden-entities" type="as">
+      <default>[]</default>
+      <summary>Entities hidden from all menus</summary>
+    </key>
+    <key name="show-ha-hidden" type="b">
+      <default>false</default>
+      <summary>Show entities that are hidden in Home Assistant</summary>
+    </key>
+    <key name="group-controls" type="b">
+      <default>true</default>
+      <summary>Show combined controls on section headers</summary>
+      <description>A section gets a combined switch when it has toggleable members, and a combined brightness slider or color picker only when at least two members support it.</description>
+    </key>
+    <key name="hide-unavailable" type="b">
+      <default>false</default>
+      <summary>Hide unavailable entities</summary>
+    </key>
+    <key name="debug" type="b">
+      <default>false</default>
+      <summary>Debug logging</summary>
+    </key>
+  </schema>
+</schemalist>
