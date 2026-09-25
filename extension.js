@@ -107,6 +107,19 @@ class HaTile extends QuickMenuToggle {
         return this._config;
     }
 
+    destroy() {
+        // The list lives in a scroll view and the buttons in the menu header;
+        // destroy them explicitly rather than relying on the menu's teardown
+        this._section.destroy();
+        this._scroll.destroy();
+        this._headerButtons.destroy();
+        this._section = null;
+        this._scroll = null;
+        this._headerButtons = null;
+        this._items = [];
+        super.destroy();
+    }
+
     _sectionRefs() {
         const {sections, sectionOrder} = this._config;
         const refs = sections === 'all' || !Array.isArray(sections)
@@ -264,12 +277,16 @@ class HaIndicator extends SystemIndicator {
         const syncVisible = () => {
             this._indicator.visible = !!config.indicator && this.tile.checked;
         };
-        this.tile.connect('notify::checked', syncVisible);
+        this.tile.connectObject('notify::checked', syncVisible, this);
         syncVisible();
     }
 
     destroy() {
+        this.tile.disconnectObject(this);
         this.quickSettingsItems.forEach(item => item.destroy());
+        this.quickSettingsItems = [];
+        this.tile = null;
+        this._indicator = null;
         super.destroy();
     }
 });
@@ -382,6 +399,7 @@ export default class HaTilesExtension extends Extension {
         this._destroyTiles();
         this._settings.disconnectObject(this);
         this._client.disconnectObject(this);
+        this._icons.disconnectObject(this);
         this._client.destroy();
         this._icons.destroy();
         this._client = null;

@@ -2,7 +2,7 @@
   "uuid": "ha-tiles@slimani.dev",
   "name": "Home Assistant Tiles",
   "description": "Control Home Assistant from GNOME Quick Settings. Live updates over a single WebSocket subscription, Home Assistant areas and icons, custom groups, and controls that follow what each device supports: switches, brightness, color, color temperature, covers, fans, numbers and sensors.",
-  "shell-version": ["48", "49", "50", "51"],
+  "shell-version": ["48", "49", "50"],
   "settings-schema": "org.gnome.shell.extensions.ha-tiles",
   "gettext-domain": "ha-tiles",
   "url": "https://github.com/slimani-dev/ha-tiles",
