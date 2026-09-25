@@ -1,6 +1,6 @@
 /* extension.js
  *
- * Home Assistant Quick Settings
+ * Home Assistant Tiles
  *
  * SPDX-License-Identifier: GPL-2.0-or-later
  */
@@ -270,12 +270,12 @@ class HaIndicator extends SystemIndicator {
     }
 });
 
-export default class HaQuickSettingsExtension extends Extension {
+export default class HaTilesExtension extends Extension {
     enable() {
         this._settings = this.getSettings();
         const log = msg => {
             if (this._settings?.get_boolean('debug'))
-                console.log(`[HA Quick Settings] ${msg}`);
+                console.log(`[Home Assistant Tiles] ${msg}`);
         };
 
         this._client = new HaClient({log});

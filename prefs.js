@@ -1,6 +1,6 @@
 /* prefs.js
  *
- * Home Assistant Quick Settings - preferences
+ * Home Assistant Tiles - preferences
  *
  * SPDX-License-Identifier: GPL-2.0-or-later
  */
@@ -54,7 +54,7 @@ function smartHomeConnections() {
                 return {name: c.name || url, url, token: c.accessToken};
             });
         } catch (e) {
-            console.warn(`[HA Quick Settings] Could not read Smart Home settings: ${e.message}`);
+            console.warn(`[Home Assistant Tiles] Could not read Smart Home settings: ${e.message}`);
         }
     }
     return [];
@@ -124,7 +124,7 @@ function button(label, {icon = null, css = []} = {}) {
     return b;
 }
 
-export default class HaQuickSettingsPreferences extends ExtensionPreferences {
+export default class HaTilesPreferences extends ExtensionPreferences {
     fillPreferencesWindow(window) {
         this._settings = this.getSettings();
         this._window = window;

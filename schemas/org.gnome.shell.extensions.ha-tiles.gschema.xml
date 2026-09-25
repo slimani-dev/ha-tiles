@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <schemalist>
-  <schema id="org.gnome.shell.extensions.ha-quick-settings" path="/org/gnome/shell/extensions/ha-quick-settings/">
+  <schema id="org.gnome.shell.extensions.ha-tiles" path="/org/gnome/shell/extensions/ha-tiles/">
     <key name="url" type="s">
       <default>''</default>
       <summary>Home Assistant URL</summary>

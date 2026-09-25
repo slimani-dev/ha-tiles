@@ -1,4 +1,4 @@
-UUID = ha-quick-settings@slimani.dev
+UUID = ha-tiles@slimani.dev
 PACKAGE = $(UUID).shell-extension.zip
 
 .PHONY: all package install uninstall icons lint clean
