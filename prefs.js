@@ -106,6 +106,19 @@ function makeReorderable(row, scope, ref, onMove) {
     row.add_controller(target);
 }
 
+// A search entry that filters rows by title and subtitle
+function searchGroup(rows) {
+    const group = new Adw.PreferencesGroup();
+    const entry = new Gtk.SearchEntry({placeholder_text: 'Search by name, entity ID or area'});
+    entry.connect('search-changed', () => {
+        const query = entry.text.trim().toLowerCase();
+        for (const row of rows)
+            row.visible = !query || `${row.title} ${row.subtitle}`.toLowerCase().includes(query);
+    });
+    group.add(entry);
+    return group;
+}
+
 // Move `from` to where `to` is: after it when dragging down, before it when dragging up
 function moveRef(list, from, to) {
     const result = list.filter(r => r !== from);
@@ -209,6 +222,17 @@ export default class HaTilesPreferences extends ExtensionPreferences {
         if (onHidden)
             nav.connect('hidden', onHidden);
         this._window.push_subpage(nav);
+    }
+
+    // [search, list] for a list group whose rows are SwitchRows
+    _withSearch(list) {
+        const rows = [];
+        const collect = w => {
+            for (let c = w.get_first_child(); c; c = c.get_next_sibling())
+                c instanceof Adw.SwitchRow ? rows.push(c) : collect(c);
+        };
+        collect(list);
+        return [searchGroup(rows), list];
     }
 
     _subpageRow(title, subtitle, onActivate, suffix = null) {
@@ -603,9 +627,9 @@ export default class HaTilesPreferences extends ExtensionPreferences {
         const refresh = () => this._refreshGroups();
         const title = what => `${group.name || 'Group'} · ${what}`;
         expander.add_row(this._subpageRow('Add devices', 'A device brings all of its entities',
-            () => this._pushSubpage(title('Add devices'), () => [this._deviceChoiceGroup(group, save, updateMembers)], refresh)));
+            () => this._pushSubpage(title('Add devices'), () => this._withSearch(this._deviceChoiceGroup(group, save, updateMembers)), refresh)));
         expander.add_row(this._subpageRow('Add single entities', 'Entities without their whole device',
-            () => this._pushSubpage(title('Add single entities'), () => [this._entityChoiceGroup(group, save, updateMembers)], refresh)));
+            () => this._pushSubpage(title('Add single entities'), () => this._withSearch(this._entityChoiceGroup(group, save, updateMembers)), refresh)));
         expander.add_row(this._subpageRow('Members', 'Devices and entities in menu order; choose what each device shows',
             () => this._pushSubpage(title('Members'), render => [this._membersGroup(group, save, render)], refresh),
             badge));
@@ -735,22 +759,27 @@ export default class HaTilesPreferences extends ExtensionPreferences {
 
         if (this._ready) {
             const hiddenGroup = new Adw.PreferencesGroup({title: 'Visible entities'});
-            const hidden = new Set(this._settings.get_strv('hidden-entities'));
-            const expander = new Adw.ExpanderRow({title: 'Entities', subtitle: `${hidden.size} hidden`});
-            for (const id of this._entitiesSorted()) {
-                const row = new Adw.SwitchRow({
-                    title: GLib.markup_escape_text(E.friendlyName(this._client, id), -1),
-                    subtitle: GLib.markup_escape_text(this._entitySubtitle(id), -1),
-                    active: !hidden.has(id),
+            const summary = () => `${this._settings.get_strv('hidden-entities').length} hidden`;
+            const open = this._subpageRow('Entities', summary(), () => this._pushSubpage('Visible entities', () => {
+                const hidden = new Set(this._settings.get_strv('hidden-entities'));
+                const list = new Adw.PreferencesGroup({description: 'Hidden entities are left out of every menu.'});
+                const rows = this._entitiesSorted().map(id => {
+                    const row = new Adw.SwitchRow({
+                        title: escape(E.friendlyName(this._client, id)),
+                        subtitle: escape(this._entitySubtitle(id)),
+                        active: !hidden.has(id),
+                    });
+                    row.connect('notify::active', () => {
+                        row.active ? hidden.delete(id) : hidden.add(id);
+                        this._settings.set_strv('hidden-entities', [...hidden]);
+                        open.subtitle = summary();
+                    });
+                    list.add(row);
+                    return row;
                 });
-                row.connect('notify::active', () => {
-                    row.active ? hidden.delete(id) : hidden.add(id);
-                    this._settings.set_strv('hidden-entities', [...hidden]);
-                    expander.subtitle = `${hidden.size} hidden`;
-                });
-                expander.add_row(row);
-            }
-            hiddenGroup.add(expander);
+                return [searchGroup(rows), list];
+            }));
+            hiddenGroup.add(open);
             result.push(hiddenGroup);
         }
         this._replaceGroups(this._displayPage, 'display', result);
